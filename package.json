@@ -1,0 +1,42 @@
+{
+  "name": "neon-street-run",
+  "version": "1.1.0",
+  "description": "NEON STREET RUN - original arcade street racer (Three.js + Electron)",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "serve": "python tools/serve.py 8200",
+    "icon": "node tools/make-icon.cjs",
+    "vendor": "node tools/vendor-three.cjs",
+    "build:web": "node tools/build-web.cjs",
+    "check": "node tools/check-imports.cjs && node tools/check-cars.mjs && node tools/check-tracks.mjs && node tools/check-time.mjs && node tools/check-input.mjs && node tools/check-physics.mjs",
+    "prebuild": "npm run icon && npm run vendor && npm run check",
+    "build": "electron-builder --win --x64",
+    "pack": "electron-builder --dir"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0",
+    "three": "0.160.0"
+  },
+  "build": {
+    "appId": "com.neonstreetrun.game",
+    "productName": "NEON STREET RUN",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "index.html",
+      "style.css",
+      "js/**/*",
+      "vendor/**/*",
+      "assets/**/*",
+      "electron/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    }
+  }
+}

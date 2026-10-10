@@ -1,0 +1,31 @@
+# Netlify deploy for the browser build.
+#
+# The repo root also contains the Electron wrapper, dev tools and node_modules, so the
+# site is built into dist-web/ first (tools/build-web.cjs) and only that is published.
+
+[build]
+  command = "npm run build:web"
+  publish = "dist-web"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# ES modules must be served with a JavaScript MIME type or the import map fails. Netlify
+# gets this right by default, but the game is all modules, so it is pinned here.
+[[headers]]
+  for = "/js/*"
+  [headers.values]
+    Content-Type = "text/javascript; charset=utf-8"
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+  for = "/vendor/*"
+  [headers.values]
+    Content-Type = "text/javascript; charset=utf-8"
+    # Three.js is version-pinned in the import map, so it can cache hard
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"

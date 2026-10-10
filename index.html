@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>NEON STREET RUN</title>
+<link rel="stylesheet" href="style.css" />
+<!-- Three.js is vendored into vendor/ (r160, same build the CDN served) so the desktop
+     build runs with no internet connection. node_modules is excluded from the packaged
+     app, so the copy must live here rather than being resolved from there. -->
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
+</head>
+<body>
+<canvas id="game-canvas"></canvas>
+
+<!-- in-game HUD (click-through) -->
+<div id="hud">
+  <div id="race-info">
+    <div class="pill"><span>LAP</span> <b id="lap">1</b><small>/<i id="laps">3</i></small></div>
+    <div class="pill"><span>POS</span> <b id="pos">1</b><small>/<i id="cars">4</i></small></div>
+    <div class="pill time"><span>TIME</span> <b id="time">00:00.0</b></div>
+  </div>
+
+  <div id="countdown"></div>
+  <div id="drift-meter"><b id="drift-text">DRIFT</b></div>
+
+  <!-- radar: circuit with your car locked pointing up -->
+  <div id="radar"><canvas id="radar-canvas"></canvas></div>
+
+  <div class="speedbox" id="p1-speed">
+    <em class="tag">P1</em><b class="val">0</b><i class="unit">KM/H</i>
+    <span class="gear" id="p1-gear">G1</span>
+    <span class="shift" id="p1-shift">SHIFT ↑</span>
+    <div class="nos"><div class="nos-fill" id="p1-nos"></div></div>
+  </div>
+  <div class="speedbox" id="p2-speed">
+    <em class="tag">P2</em><b class="val">0</b><i class="unit">KM/H</i>
+    <span class="gear" id="p2-gear">G1</span>
+    <span class="shift" id="p2-shift">SHIFT ↑</span>
+    <div class="nos"><div class="nos-fill" id="p2-nos"></div></div>
+  </div>
+
+  <div id="hint">WASD drive · SPACE handbrake drift · L-SHIFT nitrous · C slow-mo · E/Q gears · R reset · ESC menu</div>
+</div>
+
+<!-- pause / main menu -->
+<div id="menu" class="hidden">
+  <div class="panel">
+    <h1>NEON STREET RUN</h1>
+    <div class="row"><button data-act="resume">▶ RESUME</button><button data-act="restart">⟲ RESTART RACE</button></div>
+
+    <h2>MODE</h2>
+    <div class="row"><button data-mode="single">SINGLE · vs 3 AI</button><button data-mode="coop">2-PLAYER · SPLIT</button></div>
+
+    <h2>LAPS</h2>
+    <div class="row laps-row">
+      <button data-laps="1">1</button><button data-laps="2">2</button><button data-laps="3">3</button>
+      <button data-laps="5">5</button><button data-laps="8">8</button>
+    </div>
+
+    <h2>MAP</h2>
+    <div class="row maps"></div>
+
+    <h2>TIME OF DAY</h2>
+    <div class="row times"></div>
+
+    <h2>GRAPHICS</h2>
+    <div class="row quality"></div>
+
+    <h2>GARAGE</h2>
+    <div class="garage">
+      <div class="row cars"></div>
+      <p class="car-blurb" id="car-blurb"></p>
+      <div class="stats" id="car-stats"></div>
+      <div class="swatch-group"><span>PAINT</span><div class="swatches paints"></div></div>
+      <div class="swatch-group"><span>GLOW</span><div class="swatches glows"></div></div>
+      <div class="swatch-group"><span>WHEELS</span><div class="row wheels"></div></div>
+      <p class="garage-note">Looks are cosmetic — only the car you pick changes how it drives.</p>
+    </div>
+
+    <div class="row"><button data-act="info">ℹ INFO / CONTROLS</button></div>
+
+    <div id="info-panel" class="hidden">
+      <h3>How to play</h3>
+      <p>Finish the laps ahead of the pack. Tap the handbrake to swing the tail out, then hold the slide with counter-steer and throttle — grip builds back as the slip angle comes down. Shift up to unlock more speed, and save nitrous for the straights.</p>
+      <table>
+        <tr><th>Action</th><th>Player 1</th><th>Player 2</th></tr>
+        <tr><td>Drive / steer</td><td>W A S D</td><td>Arrow keys</td></tr>
+        <tr><td>Handbrake (drift)</td><td>Space</td><td>Right-Shift</td></tr>
+        <tr><td>Nitrous</td><td>Left-Shift</td><td>Numpad 0</td></tr>
+        <tr><td>Slow-mo</td><td>C</td><td>—</td></tr>
+        <tr><td>Gear up / down</td><td>E / Q</td><td>. / ,</td></tr>
+        <tr><td>Reset car</td><td>R</td><td>Right-Ctrl</td></tr>
+      </table>
+      <p class="gears">Gears &nbsp; <b>G1</b> ≤60 &nbsp; <b>G2</b> ≤110 &nbsp; <b>G3</b> ≤175 &nbsp; <b>G4</b> ≤250 km/h</p>
+    </div>
+
+    <p class="tip">ESC resumes · changing mode, laps or map restarts the race · keys 1 / 2 switch mode</p>
+  </div>
+</div>
+
+<!-- finish result -->
+<div id="finish" class="hidden">
+  <div class="panel">
+    <div class="result"></div>
+    <div class="row"><button data-act="restart">⟲ RESTART</button><button data-act="menu">☰ MENU</button></div>
+  </div>
+</div>
+
+<!-- high-speed vignette (speed lines) -->
+<div id="speed-lines"></div>
+
+<div id="rotate-prompt">
+  <div class="phone"></div>
+  <b>ROTATE YOUR DEVICE</b>
+  <span>NEON STREET RUN is built for landscape. Turn your phone sideways to drive.</span>
+</div>
+
+<div id="loading">NEON STREET RUN<small>loading…</small></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
