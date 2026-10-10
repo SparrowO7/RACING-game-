@@ -9,6 +9,11 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  # The web bundle is assembled with Node built-ins only, and Three.js is committed in
+  # vendor/ — so nothing in devDependencies is needed here. Electron's postinstall would
+  # otherwise pull ~100 MB of desktop binaries into every deploy for no reason.
+  ELECTRON_SKIP_BINARY_DOWNLOAD = "1"
+  NPM_FLAGS = "--omit=optional"
 
 # ES modules must be served with a JavaScript MIME type or the import map fails. Netlify
 # gets this right by default, but the game is all modules, so it is pinned here.
