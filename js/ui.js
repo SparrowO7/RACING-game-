@@ -37,6 +37,8 @@ export class UI {
 
     const times = this.menu.querySelector('.times');
     times.innerHTML = '';
+    // AUTO follows the device's light/dark theme; the named presets pin it.
+    mk(times, 'time', 'auto', 'Auto');
     TIMES.forEach((t) => mk(times, 'time', t.id, t.name));
 
     const quality = this.menu.querySelector('.quality');
@@ -83,6 +85,7 @@ export class UI {
       else if (d.map !== undefined) g.loadMap(+d.map);
       else if (d.time) g.setTimeOfDay(d.time);
       else if (d.quality) g.setQuality(d.quality);
+      else if (d.haptics) g.setHapticsEnabled(d.haptics === 'on');
       else if (d.car) g.setCar(1, d.car);
       else if (d.paint) g.setStyle(1, { paint: PAINTS.find((p) => p.id === d.paint).hex });
       else if (d.glow) {
@@ -119,8 +122,17 @@ export class UI {
     mark('[data-mode]', (b) => b.dataset.mode === g.mode);
     mark('[data-map]', (b) => Number(b.dataset.map) === g.mapIndex);
     mark('[data-laps]', (b) => Number(b.dataset.laps) === g.totalLaps);
-    mark('[data-time]', (b) => b.dataset.time === g.timeId);
+    // AUTO is active while the game is still following the system theme
+    mark('[data-time]', (b) => (b.dataset.time === 'auto' ? g.timeAuto : !g.timeAuto && b.dataset.time === g.timeId));
     mark('[data-quality]', (b) => b.dataset.quality === g.qualityId);
+
+    // Only offer the vibration toggle where the device can actually vibrate, rather than
+    // showing a switch that silently does nothing.
+    const hapticsRow = document.getElementById('haptics-row');
+    if (hapticsRow) {
+      hapticsRow.hidden = !g.hapticsAvailable;
+      mark('[data-haptics]', (b) => (b.dataset.haptics === 'on') === !!g.hapticsOn);
+    }
     mark('[data-car]', (b) => b.dataset.car === g.p1Car);
     mark('[data-wheels]', (b) => b.dataset.wheels === (g.p1Style.wheels || 'split5'));
     mark('[data-paint]', (b) => {

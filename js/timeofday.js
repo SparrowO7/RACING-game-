@@ -62,6 +62,25 @@ export const TIMES = [
 export const DEFAULT_TIME = 'night';
 export function timeById(id) { return TIMES.find((t) => t.id === id) || TIMES[TIMES.length - 1]; }
 
+// Follow the device theme the way a website does: a phone in dark mode gets the night
+// circuit, light mode gets daylight. Only a starting point — picking a time explicitly in
+// the menu takes over, and the game stops following the system until AUTO is chosen again.
+export function detectSystemTime() {
+  const dark = typeof window !== 'undefined'
+    && window.matchMedia
+    && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  return dark ? 'night' : 'day';
+}
+
+// Subscribe to system theme changes. Returns an unsubscribe function.
+export function watchSystemTime(onChange) {
+  if (typeof window === 'undefined' || !window.matchMedia) return () => {};
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  const handler = (e) => onChange(e.matches ? 'night' : 'day');
+  mq.addEventListener('change', handler);
+  return () => mq.removeEventListener('change', handler);
+}
+
 // A vertical gradient sky texture from a preset's stops.
 export function skyTextureFor(preset) {
   const c = document.createElement('canvas');

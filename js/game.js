@@ -18,7 +18,8 @@ import { CARS, carById } from './cars.js';
 import { Race, formatTime } from './race.js';
 import { MAPS } from './maps.js';
 import { UI } from './ui.js';
-import { TIMES, DEFAULT_TIME, timeById } from './timeofday.js';
+import { TIMES, timeById, detectSystemTime, watchSystemTime } from './timeofday.js';
+import { haptic, setHaptics, hapticsSupported } from './haptics.js';
 import { qualityById, detectQuality, QUALITY_LIST } from './quality.js';
 import { TouchControls, isTouchDevice } from './touch.js';
 import { GameAudio } from './audio.js';
@@ -65,7 +66,12 @@ export class Game {
     this.mapIndex = 0;
     this.lapsOverride = null;
     this.totalLaps = MAPS[0].laps;
-    this.timeId = DEFAULT_TIME;
+    // Follow the device theme like a website does, until the player picks a time.
+    this.timeAuto = true;
+    this.timeId = detectSystemTime();
+    this._stopWatchingTheme = watchSystemTime((id) => {
+      if (this.timeAuto) { this.timeId = id; this._applyTime(); this.ui?.refresh(); }
+    });
 
     // car selection + customisation (set from the garage screen)
     this.p1Car = CARS[0].id;
@@ -103,6 +109,8 @@ export class Game {
 
     // On a touch device the on-screen controls become player 1's input. They implement
     // the same controller interface, so nothing downstream changes.
+    this.hapticsOn = true;
+    this.hapticsAvailable = hapticsSupported();
     this.touch = isTouchDevice() ? new TouchControls() : null;
     if (this.touch) {
       document.body.classList.add('touch-device');
@@ -252,11 +260,19 @@ export class Game {
   }
 
   setTimeOfDay(id) {
-    if (!TIMES.some((t) => t.id === id)) return;
-    this.timeId = id;
+    if (id === 'auto') {
+      this.timeAuto = true;
+      this.timeId = detectSystemTime();
+    } else {
+      if (!TIMES.some((t) => t.id === id)) return;
+      this.timeAuto = false;
+      this.timeId = id;
+    }
     this._applyTime();
     this.ui?.refresh();
   }
+
+  setHapticsEnabled(on) { this.hapticsOn = !!on; setHaptics(this.hapticsOn); this.ui?.refresh(); }
 
   setGameMode(mode) {
     if (mode === this.mode) return;
@@ -351,11 +367,11 @@ export class Game {
         // Touch defaults to an automatic box: a sixth on-screen button for shifting is
         // one too many on a phone, and the player can switch it to manual in the HUD.
         if (c.autoShift) {
-          if (car.canShiftUp()) { car.shiftUp(); this.audio.shift(); }
-          else if (car.canShiftDown()) { car.shiftDown(); this.audio.shift(); }
+          if (car.canShiftUp()) { car.shiftUp(); this.audio.shift(); haptic('shift'); }
+          else if (car.canShiftDown()) { car.shiftDown(); this.audio.shift(); haptic('shift'); }
         }
-        if (c.shiftUpPressed && car.shiftUp()) this.audio.shift();
-        if (c.shiftDownPressed && car.shiftDown()) this.audio.shift();
+        if (c.shiftUpPressed && car.shiftUp()) { this.audio.shift(); haptic('shift'); }
+        if (c.shiftDownPressed && car.shiftDown()) { this.audio.shift(); haptic('shift'); }
         if (c.resetPressed) car.reset();
         car._handbrake = c.handbrake;
         car._braking = c.brake > 0;
@@ -379,7 +395,7 @@ export class Game {
 
       for (const p of this.players) {
         const car = p.car;
-        if (car.nosActive && !car._wasNos) { this.audio.nos(); p.camera.addShake(0.18); }
+        if (car.nosActive && !car._wasNos) { this.audio.nos(); p.camera.addShake(0.18); haptic('nos'); }
         car._wasNos = car.nosActive;
         car._hitCd = Math.max(0, car._hitCd - dt);
       }
@@ -407,16 +423,19 @@ export class Game {
   _raceAudioCues() {
     if (this.race.phase === 'countdown') {
       const num = Math.ceil(this.race.countdown);
-      if (num !== this._lastCount) { this._lastCount = num; if (num >= 1 && num <= 3) this.audio.countdownBeep(); }
+      if (num !== this._lastCount) {
+        this._lastCount = num;
+        if (num >= 1 && num <= 3) { this.audio.countdownBeep(); haptic('count'); }
+      }
     } else if (this._lastCount !== 0) {
       this._lastCount = 0;
-      if (this.race.phase === 'racing') this.audio.go();
+      if (this.race.phase === 'racing') { this.audio.go(); haptic('go'); }
     }
     for (const p of this.players) {
       const e = this.race.entryOf(p.car);
       if (!e) continue;
       if (p.car._prevStage === undefined) { p.car._prevStage = e.stage; continue; }
-      if (e.stage !== p.car._prevStage) { p.car._prevStage = e.stage; this.audio.checkpoint(); }
+      if (e.stage !== p.car._prevStage) { p.car._prevStage = e.stage; this.audio.checkpoint(); haptic('checkpoint'); }
     }
   }
 
@@ -509,7 +528,11 @@ export class Game {
       if (wallHit > 7) {
         p.camera.addShake(Math.min(0.6, wallHit / 40));
         this._sparks(car);
-        if (car._hitCd <= 0) { this.audio.collision(Math.min(wallHit / 30, 1)); car._hitCd = 0.3; }
+        if (car._hitCd <= 0) {
+          this.audio.collision(Math.min(wallHit / 30, 1));
+          haptic('crash', wallHit / 30);
+          car._hitCd = 0.3;
+        }
       }
     }
   }
@@ -529,6 +552,7 @@ export class Game {
         p.camera.addShake(Math.min(0.5, hit.impact / 26));
         if (p.car._hitCd <= 0) {
           this.audio.collision(Math.min(hit.impact / 20, 1));
+          haptic(hit.impact > 10 ? 'crash' : 'bump', hit.impact / 20);
           p.car._hitCd = 0.25;
         }
       }
@@ -592,6 +616,7 @@ export class Game {
 
   _showFinish() {
     this._finishShown = true;
+    haptic('finish');
     const w = this.race.winner;
     let html;
     if (this.mode === 'coop') {

@@ -10,7 +10,7 @@
     "icon": "node tools/make-icon.cjs",
     "vendor": "node tools/vendor-three.cjs",
     "build:web": "node tools/build-web.cjs",
-    "check": "node tools/check-imports.cjs && node tools/check-cars.mjs && node tools/check-tracks.mjs && node tools/check-time.mjs && node tools/check-input.mjs && node tools/check-physics.mjs",
+    "check": "node tools/check-imports.cjs && node tools/check-cars.mjs && node tools/check-tracks.mjs && node tools/check-time.mjs && node tools/check-input.mjs && node tools/check-haptics.mjs && node tools/check-physics.mjs",
     "prebuild": "npm run icon && npm run vendor && npm run check",
     "build": "electron-builder --win --x64",
     "pack": "electron-builder --dir"
