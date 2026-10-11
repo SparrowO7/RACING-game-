@@ -19,6 +19,39 @@ import { haptic } from './haptics.js';
 const STEER_TRAVEL = 64;    // px of drag for full lock
 const TILT_RANGE = 26;      // degrees of tilt for full lock
 const TILT_DEADZONE = 1.5;  // degrees ignored around the calibrated centre
+const TILT_TIMEOUT = 1400;  // ms to wait for a first sensor reading before giving up
+
+// Lateral ("lean") tilt in SCREEN space, from the device-frame angles.
+//
+// beta is rotation about the device's X axis and gamma about its Y axis, both fixed to the
+// hardware — so which one means "lean left/right" depends on how the screen is rotated
+// relative to the device. Rotating the (gamma, beta) pair by the screen orientation angle
+// handles every case with one expression instead of a branch per orientation, which is
+// where sign mistakes hide. At angle 0 this is just gamma, as it should be in portrait.
+export function lateralTilt(beta, gamma, angle) {
+  if (beta === null || beta === undefined || gamma === null || gamma === undefined) return null;
+  const rad = (angle * Math.PI) / 180;
+  return gamma * Math.cos(rad) - beta * Math.sin(rad);
+}
+
+// The screen's rotation, preferring the modern API and falling back to the deprecated one.
+export function screenAngle() {
+  if (typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.angle === 'number') {
+    return screen.orientation.angle;
+  }
+  if (typeof window !== 'undefined' && typeof window.orientation === 'number') return window.orientation;
+  return 0;
+}
+
+// Why tilt steering cannot run here, or null if it can. Device-motion sensors are gated
+// behind a secure context in Chrome, so a LAN address like http://192.168.x.x silently
+// delivers no events at all — the most likely reason tilt "does nothing" in testing.
+export function tiltBlockedReason() {
+  if (typeof window === 'undefined') return 'no window';
+  if (!window.DeviceOrientationEvent) return 'sensor not supported';
+  if (!window.isSecureContext) return 'needs HTTPS';
+  return null;
+}
 
 export class TouchControls {
   constructor(opts = {}) {
@@ -40,6 +73,9 @@ export class TouchControls {
     this._steerOrigin = 0;
     this._buttons = new Map();
     this._tiltZero = null;
+    this._tiltInvert = false;
+    this._tiltSeen = false;
+    this._tiltTimer = null;
 
     this._root = this._build();
     document.body.appendChild(this._root);
@@ -62,6 +98,7 @@ export class TouchControls {
 
       <div class="t-toggles">
         <button class="t-mini t-tilt" data-btn="tilt">TILT</button>
+        <button class="t-mini t-invert" data-btn="tiltInvert" hidden>⇄ FLIP</button>
         <button class="t-mini t-gear" data-btn="gearToggle">AUTO</button>
         <button class="t-mini" data-btn="reset">RESET</button>
         <button class="t-mini t-shift-up" data-btn="shiftUp" hidden>GEAR ▲</button>
@@ -77,6 +114,7 @@ export class TouchControls {
     this._wheel = root.querySelector('.t-wheel');
     this._gearBtn = root.querySelector('.t-gear');
     this._tiltBtn = root.querySelector('.t-tilt');
+    this._invertBtn = root.querySelector('.t-invert');
     this._shiftUpBtn = root.querySelector('.t-shift-up');
     this._shiftDownBtn = root.querySelector('.t-shift-down');
     return root;
@@ -159,6 +197,13 @@ export class TouchControls {
       case 'shiftDown': if (isDown) this._shiftDownEdge = true; break;
       case 'gearToggle': if (isDown) this.setAutoShift(!this.autoShift); break;
       case 'tilt': if (isDown) this.toggleTilt(); break;
+      case 'tiltInvert':
+        if (isDown) {
+          this._tiltInvert = !this._tiltInvert;
+          this._invertBtn.classList.toggle('on', this._tiltInvert);
+          this._tiltZero = null;            // recalibrate so the flip feels immediate
+        }
+        break;
     }
   }
 
@@ -166,20 +211,23 @@ export class TouchControls {
   async toggleTilt() {
     if (this.tiltEnabled) { this.setTilt(false); return; }
 
+    // Refuse up front for reasons we can know without waiting, and say which one.
+    const blocked = tiltBlockedReason();
+    if (blocked) { this._tiltUnavailable(blocked); return; }
+
     // iOS 13+ gates motion data behind a permission prompt that must be triggered by a
     // user gesture — which this button press is.
     const DOE = window.DeviceOrientationEvent;
-    if (DOE && typeof DOE.requestPermission === 'function') {
+    if (typeof DOE.requestPermission === 'function') {
       try {
-        const res = await DOE.requestPermission();
-        if (res !== 'granted') { this._tiltUnavailable('permission denied'); return; }
+        if (await DOE.requestPermission() !== 'granted') {
+          this._tiltUnavailable('permission denied');
+          return;
+        }
       } catch {
         this._tiltUnavailable('permission failed');
         return;
       }
-    } else if (!DOE) {
-      this._tiltUnavailable('not supported');
-      return;
     }
     this.setTilt(true);
   }
@@ -190,9 +238,21 @@ export class TouchControls {
     this._tiltBtn.textContent = on ? 'TILT ON' : 'TILT';
     this._wheel.classList.toggle('tilt-mode', on);
     this._tiltZero = null;             // recalibrate on the next reading
+    this._invertBtn.hidden = !on;
+    clearTimeout(this._tiltTimer);
+
     if (on) {
+      this._tiltSeen = false;
       window.addEventListener('deviceorientation', this._onTilt);
       haptic('shift');
+      // Some devices register the listener happily and then never fire. Rather than
+      // leaving the player tilting a phone that does nothing, give up and say so.
+      this._tiltTimer = setTimeout(() => {
+        if (!this._tiltSeen) {
+          this.setTilt(false);
+          this._tiltUnavailable('no sensor data');
+        }
+      }, TILT_TIMEOUT);
     } else {
       window.removeEventListener('deviceorientation', this._onTilt);
       this._tiltSteer = 0;
@@ -200,23 +260,26 @@ export class TouchControls {
     }
   }
 
+  // Tell the player why, on the button itself — "needs HTTPS" in particular is something
+  // they can act on (open the deployed site instead of the LAN address).
   _tiltUnavailable(reason) {
-    this._tiltBtn.textContent = 'NO TILT';
+    this._tiltBtn.textContent = reason === 'needs HTTPS' ? 'TILT: HTTPS' : 'NO TILT';
     this._tiltBtn.classList.add('unavailable');
-    this._tiltBtn.disabled = true;
+    this._tiltBtn.classList.remove('on');
     this._tiltBtn.title = `Tilt steering unavailable: ${reason}`;
+    this._invertBtn.hidden = true;
+    // not disabled: the player may fix the cause (grant permission, reload over HTTPS)
   }
 
   _handleTilt(e) {
-    // In landscape the phone is rotated, so the axis that means "lean left/right" swaps.
-    // screen.orientation.angle tells us which one to read, and its sign.
-    const angle = (screen.orientation && screen.orientation.angle) ?? window.orientation ?? 0;
-    let raw;
-    if (angle === 90) raw = e.beta;
-    else if (angle === 270 || angle === -90) raw = -e.beta;
-    else if (angle === 180) raw = -e.gamma;
-    else raw = e.gamma;
-    if (raw === null || raw === undefined) return;
+    const raw = lateralTilt(e.beta, e.gamma, screenAngle());
+    if (raw === null) return;
+
+    if (!this._tiltSeen) {
+      this._tiltSeen = true;
+      clearTimeout(this._tiltTimer);
+      this._tiltBtn.classList.remove('unavailable');
+    }
 
     if (this._tiltZero === null) this._tiltZero = raw;   // however they were holding it
     let delta = raw - this._tiltZero;
@@ -224,7 +287,7 @@ export class TouchControls {
     else delta -= Math.sign(delta) * TILT_DEADZONE;
 
     const t = Math.max(-1, Math.min(1, delta / TILT_RANGE));
-    this._tiltSteer = -t;
+    this._tiltSteer = (this._tiltInvert ? t : -t);
     this._setSteer(this._tiltSteer);
   }
 
@@ -263,6 +326,7 @@ export class TouchControls {
       btn.removeEventListener('pointercancel', up);
     }
     window.removeEventListener('deviceorientation', this._onTilt);
+    clearTimeout(this._tiltTimer);
     this._root.remove();
   }
 }

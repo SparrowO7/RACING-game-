@@ -64,13 +64,31 @@ export function qualityById(id) { return QUALITY[id] || QUALITY.high; }
 // Pick a sensible starting point rather than making a phone render the desktop scene once
 // before the player finds the settings. Deliberately conservative: a wrong guess upward
 // costs a bad first impression, a wrong guess downward costs a little sharpness.
+//
+// Pixel count matters as much as core count, and it is where tablets catch you out: a
+// large tablet reports plenty of cores but also a very high-resolution panel, so the GPU
+// is being asked to shade several times a phone's workload. Fill rate is what this engine
+// is bound by, so the raw pixel budget gets the final say.
 export function detectQuality() {
   const coarse = window.matchMedia('(pointer: coarse)').matches;
   const cores = navigator.hardwareConcurrency || 4;
-  const smallScreen = Math.min(window.screen.width, window.screen.height) <= 500;
+  const w = window.screen.width, h = window.screen.height;
+  const shortSide = Math.min(w, h);
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const megapixels = (w * dpr * h * dpr) / 1e6;
 
-  if (coarse && (smallScreen || cores <= 6)) return 'low';
-  if (coarse) return 'medium';
-  if (cores <= 4) return 'medium';
-  return 'high';
+  let tier;
+  if (coarse) {
+    tier = (shortSide <= 500 || cores <= 6) ? 'low' : 'medium';
+  } else {
+    tier = cores <= 4 ? 'medium' : 'high';
+  }
+
+  // A very dense panel pulls the tier down one step regardless of core count. The touch
+  // threshold is set above a normal tablet (~3.9 MP) so an iPad keeps its shadows, and
+  // only the large high-resolution ones (~5.6 MP) drop to the no-shadow preset.
+  if (megapixels > 4.5 && tier === 'high') tier = 'medium';
+  if (megapixels > 4.8 && tier === 'medium' && coarse) tier = 'low';
+
+  return tier;
 }
